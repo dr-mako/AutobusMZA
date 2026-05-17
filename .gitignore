@@ -1,0 +1,12 @@
+dataverse_files
+requirements.txt
+OLD
+OUTPUT_STEP1_AVL
+OUTPUT_STEP2_RACEBOX
+OUTPUT_STEP3
+OUTPUT_STEP4
+OUTPUT_STEP5
+OUTPUT_STEP6
+*.csv
+*.png
+*.svg
