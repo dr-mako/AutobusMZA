@@ -1,20 +1,22 @@
-# =====================================================
-# step2_racebox_trip_separator.py
+# step_2_racebox_trip_separator.py
+#  =========================================================
+# RACEBOX PRODUCTION SEGMENTATION SYSTEM
+# =========================================================
 #
-# RACEBOX ONLY
+# STEP1 ARCHITECTURE
+# +
+# STEP2 SEGMENTATION ENGINE
 #
-# MATLAB -> PYTHON
-#
-# TOPOLOGICAL TRIP SEGMENTATION
-#
-# =====================================================
+# =========================================================
 
 import os
 import glob
+import warnings
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+
+from pathlib import Path
 
 from math import radians
 from math import sin
@@ -22,44 +24,39 @@ from math import cos
 from math import sqrt
 from math import atan2
 
-# =====================================================
+import matplotlib.pyplot as plt
+
+warnings.filterwarnings("ignore")
+
+# =========================================================
 # PARAMETRY
-# =====================================================
+# =========================================================
 
-BUS_NUMBER = "146"
+PATH_CATALOG = r"DANE/Katalog.xlsx"
 
-MAX_STOP_DISTANCE = 80
+PATH_DATA = r"DANE"
+
+PATH_OUTPUT = r"OUTPUT"
+
+MAX_STOP_DISTANCE = 120
+
+TERMINAL_DWELL_TIME = 120
+
+LOW_SPEED_THRESHOLD = 3
 
 TRIM_SAMPLES = 15
 
-# =====================================================
-# ŚCIEŻKI
-# =====================================================
+#DOWNSAMPLE = 5
 
-base_dir = os.getcwd()
-
-data_dir = os.path.join(
-    base_dir,
-    "DANE"
-)
-
-output_dir = os.path.join(
-    base_dir,
-    "OUTPUT_RACEBOX"
-)
-
-os.makedirs(
-    output_dir,
-    exist_ok=True
-)
-
-# =====================================================
+# =========================================================
 # HAVERSINE
-# =====================================================
+# =========================================================
 
 def haversine(
+
     lat1,
     lon1,
+
     lat2,
     lon2
 ):
@@ -76,8 +73,11 @@ def haversine(
     dlon = lon2 - lon1
 
     a = (
+
         sin(dlat / 2) ** 2
+
         +
+
         cos(lat1)
         *
         cos(lat2)
@@ -86,637 +86,1804 @@ def haversine(
     )
 
     c = 2 * atan2(
+
         sqrt(a),
         sqrt(1 - a)
     )
 
     return R * c
 
-# =====================================================
-# TOPOLOGIA
-# =====================================================
+# =========================================================
+# READ CATALOG
+# =========================================================
 
-print()
-print("===================================")
-print("TOPOLOGIA")
-print("===================================")
+def read_catalog(path_catalog):
 
-file_topology = os.path.join(
-    data_dir,
-    "stoptimes_146_DW_FAL.xlsx"
-)
+    print()
+    print("Reading catalog...")
 
-df_topology = pd.read_excel(
-    file_topology
-)
+    df = pd.read_excel(path_catalog)
 
-lat_stop = df_topology[
-    "stop_lat"
-].values
+    required_columns = [
 
-lon_stop = df_topology[
-    "stop_lon"
-].values
+        "KATALOG",
 
-stop_sequence = df_topology[
-    "stop_sequence"
-].values
+        "RaceBox.csv",
 
-N_stops = len(stop_sequence)
+        "stoptimes_1.xlsx",
 
-print("Liczba przystanków:")
-print(N_stops)
+        "vehicle",
 
-# =====================================================
-# RACEBOX
-# =====================================================
+        "od_dnia",
+        "od_godz",
 
-print()
-print("===================================")
-print("RACEBOX")
-print("===================================")
-
-pattern = os.path.join(
-    data_dir,
-    "RaceBox_*.csv"
-)
-
-file_path = glob.glob(pattern)[0]
-
-print(file_path)
-
-df = pd.read_csv(
-    file_path
-)
-
-# =====================================================
-# KOLUMNY
-# =====================================================
-
-rename_dict = {
-
-    "Latitude": "lat",
-    "Longitude": "lon"
-}
-
-df = df.rename(
-    columns=rename_dict
-)
-
-# =====================================================
-# CZAS
-# =====================================================
-
-df["Time"] = pd.to_datetime(
-
-    df["Time"],
-
-    errors="coerce"
-)
-
-# =====================================================
-# FILTR
-# =====================================================
-
-df = df.dropna(
-
-    subset=[
-
-        "lat",
-        "lon",
-        "Time"
+        "do_dnia",
+        "do_godz"
     ]
-)
 
-# =====================================================
-# SORTOWANIE
-# =====================================================
+    for col in required_columns:
 
-df = df.sort_values(
-    "Time"
-)
+        if col not in df.columns:
 
-df = df.reset_index(
-    drop=True
-)
+            raise Exception(
+                f"Missing column: {col}"
+            )
 
-# =====================================================
-# DOWNSAMPLING
-# =====================================================
+    return df
 
-df = df.iloc[::5].copy()
+# =========================================================
+# VALIDATE CASE
+# =========================================================
 
-# =====================================================
-# SPEED
-# =====================================================
+def validate_case(row):
 
-N = len(df)
+    required = [
 
-speed_kmh = np.zeros(N)
+        "KATALOG",
 
-distance_m = np.zeros(N)
+        "RaceBox.csv",
 
-time_s = np.zeros(N)
+        "stoptimes_1.xlsx",
 
-for i in range(1, N):
+        "vehicle"
+    ]
 
-    d = haversine(
+    for field in required:
 
-        df.iloc[i-1]["lat"],
-        df.iloc[i-1]["lon"],
+        value = row[field]
 
-        df.iloc[i]["lat"],
-        df.iloc[i]["lon"]
+        if pd.isna(value):
+
+            return False
+
+        if str(value).strip() == "":
+
+            return False
+
+    return True
+
+# =========================================================
+# OUTPUT DIRECTORY
+# =========================================================
+
+def create_output_directory(
+
+    output_root,
+    racebox_name,
+    vehicle_id
+):
+
+    output_dir = (
+
+        Path(output_root)
+
+        /
+
+        f"{racebox_name}"
+
+        /
+
+        f"vehicle_{vehicle_id}"
     )
 
-    distance_m[i] = d
+    output_dir.mkdir(
 
-    dt = (
+        parents=True,
+        exist_ok=True
+    )
 
-        df.iloc[i]["Time"]
-        -
-        df.iloc[i-1]["Time"]
+    return str(output_dir)
 
-    ).total_seconds()
+# =========================================================
+# READ RACEBOX
+# =========================================================
 
-    time_s[i] = dt
+def read_racebox(path_csv):
 
-    if dt > 0:
+    print()
+    print("Reading RaceBox...")
 
-        speed_kmh[i] = (
-            d / dt
-        ) * 3.6
+    df = pd.read_csv(path_csv)
 
-df["speed_kmh"] = speed_kmh
+    rename_dict = {
 
-# =====================================================
-# NEAREST STOP
-# =====================================================
+        "Latitude": "lat",
+        "Longitude": "lon"
+    }
 
-print()
-print("Nearest stop assignment...")
+    df = df.rename(
+        columns=rename_dict
+    )
 
-nearest_stop_id = []
+    return df
 
-nearest_distance = []
+# =========================================================
+# READ STOPS
+# =========================================================
 
-for i in range(N):
+def read_stops(path_excel):
 
-    lat_bus = df.iloc[i]["lat"]
+    print()
+    print("Reading stops...")
 
-    lon_bus = df.iloc[i]["lon"]
+    df = pd.read_excel(
+        path_excel
+    )
 
-    dist_all = []
+    required = [
 
-    if i % 1000 == 0:
+        "stop_sequence",
+        "stop_lat",
+        "stop_lon"
+    ]
 
-        print(
-            f"{i} / {N}"
+    for col in required:
+
+        if col not in df.columns:
+
+            raise Exception(
+                f"Missing stop column: {col}"
+            )
+
+    return df
+
+# =========================================================
+# PREPARE GPS
+# =========================================================
+
+def prepare_gps(df):
+
+    print()
+    print("Preparing GPS...")
+
+    # =====================================================
+    # TIME
+    # =====================================================
+
+    df["Time"] = pd.to_datetime(
+
+        df["Time"],
+
+        errors="coerce"
+    )
+
+    # =====================================================
+    # DROP NaN
+    # =====================================================
+
+    df = df.dropna(
+
+        subset=[
+
+            "lat",
+            "lon",
+            "Time"
+        ]
+
+    ).copy()
+
+    # =====================================================
+    # SORT
+    # =====================================================
+
+    df = df.sort_values(
+        "Time"
+    )
+
+    df = df.reset_index(
+        drop=True
+    )
+
+    # =====================================================
+    # MATLAB DOWNSAMPLING
+    # =====================================================
+
+    df = df.iloc[::7].copy()
+
+    df = df.reset_index(
+        drop=True
+    )
+
+    return df
+
+# =========================================================
+# OPTIONAL TIME FILTER
+# =========================================================
+
+def apply_time_filter(
+
+    df,
+
+    od_dnia,
+    od_godz,
+
+    do_dnia,
+    do_godz
+):
+
+    print()
+    print("Time filter...")
+
+    # =====================================================
+    # EMPTY
+    # =====================================================
+
+    if (
+
+        pd.isna(od_dnia)
+        or
+        pd.isna(od_godz)
+
+    ):
+
+        return df
+
+    # =====================================================
+    # START
+    # =====================================================
+
+    start_day = int(od_dnia)
+    start_hour = int(od_godz)
+
+    # =====================================================
+    # END
+    # =====================================================
+
+    if (
+
+        pd.isna(do_dnia)
+        or
+        pd.isna(do_godz)
+
+    ):
+
+        end_day = start_day
+        end_hour = 23
+
+    else:
+
+        end_day = int(do_dnia)
+        end_hour = int(do_godz)
+
+    # =====================================================
+    # VECTOR
+    # =====================================================
+
+    day = df["Time"].dt.day
+
+    hour = df["Time"].dt.hour
+
+    # =====================================================
+    # SAME DAY
+    # =====================================================
+
+    if start_day == end_day:
+
+        idx = (
+
+            (day == start_day)
+
+            &
+
+            (hour >= start_hour)
+
+            &
+
+            (hour <= end_hour)
         )
 
-    for j in range(N_stops):
+    # =====================================================
+    # OVER MIDNIGHT
+    # =====================================================
+
+    else:
+
+        idx = (
+
+            (
+
+                (day == start_day)
+
+                &
+
+                (hour >= start_hour)
+
+            )
+
+            |
+
+            (
+
+                (day == end_day)
+
+                &
+
+                (hour <= end_hour)
+
+            )
+        )
+
+    df = df[idx].copy()
+
+    df = df.reset_index(
+        drop=True
+    )
+
+    print()
+    print("After time filter:")
+    print(len(df))
+
+    return df
+'''
+# =========================================================
+# SPEED
+# =========================================================
+
+def compute_speed(df):
+
+    print()
+    print("Speed estimation...")
+
+    N = len(df)
+
+    speed_kmh = np.zeros(N)
+
+    distance_m = np.zeros(N)
+
+    time_s = np.zeros(N)
+
+    for i in range(1, N):
 
         d = haversine(
 
-            lat_bus,
-            lon_bus,
+            df.iloc[i-1]["lat"],
+            df.iloc[i-1]["lon"],
 
-            lat_stop[j],
-            lon_stop[j]
+            df.iloc[i]["lat"],
+            df.iloc[i]["lon"]
         )
 
-        dist_all.append(d)
+        distance_m[i] = d
 
-    dist_all = np.array(dist_all)
+        dt = (
 
-    idx_min = np.argmin(dist_all)
+            df.iloc[i]["Time"]
 
-    nearest_stop_id.append(
-        stop_sequence[idx_min]
+            -
+
+            df.iloc[i-1]["Time"]
+
+        ).total_seconds()
+
+        time_s[i] = dt
+
+        if dt > 0:
+
+            speed_kmh[i] = (
+
+                d / dt
+
+            ) * 3.6
+
+    df["speed_kmh"] = speed_kmh
+
+    df["distance_m"] = distance_m
+
+    df["time_s"] = time_s
+
+    return df
+'''
+# =========================================================
+# NEAREST STOP
+# =========================================================
+
+def assign_nearest_stop(
+
+    df,
+    stops_df
+):
+
+    print()
+    print("Nearest stop assignment...")
+
+    stop_sequence = (
+        stops_df["stop_sequence"]
+        .to_numpy()
     )
 
-    nearest_distance.append(
-        dist_all[idx_min]
+    lat_stop = (
+        stops_df["stop_lat"]
+        .to_numpy()
     )
 
-df["nearest_stop_id"] = nearest_stop_id
-
-df["nearest_distance_m"] = nearest_distance
-
-# =====================================================
-# FILTR ODLĘGŁOŚCI
-# =====================================================
-
-df.loc[
-    df["nearest_distance_m"]
-    >
-    MAX_STOP_DISTANCE,
-
-    "nearest_stop_id"
-
-] = np.nan
-
-# =====================================================
-# DIRECTION
-# =====================================================
-
-dstop = df[
-    "nearest_stop_id"
-].diff()
-
-direction = np.zeros(N)
-
-for i in range(1, N):
-
-    if dstop.iloc[i] > 0:
-
-        direction[i] = 1
-
-    elif dstop.iloc[i] < 0:
-
-        direction[i] = -1
-
-    else:
-
-        direction[i] = direction[i-1]
-
-df["direction"] = direction
-
-# =====================================================
-# SEGMENTACJA
-# =====================================================
-
-course_id = np.zeros(N)
-
-course = 1
-
-course_id[0] = course
-
-# -----------------------------------------------------
-# PARAMETRY POSTOJU
-# -----------------------------------------------------
-
-TERMINAL_STOPS = [0, 39]
-
-DWELL_TIME_THRESHOLD = 120
-
-LOW_SPEED_THRESHOLD = 3
-
-# -----------------------------------------------------
-# SEGMENTACJA
-# -----------------------------------------------------
-
-terminal_dwell_time = 0
-terminal_split_done = False
-
-for i in range(1, N):
-
-    # -------------------------------------------------
-    # ZMIANA KIERUNKU
-    # -------------------------------------------------
-
-    direction_change = (
-
-        direction[i]
-        !=
-        direction[i-1]
-
+    lon_stop = (
+        stops_df["stop_lon"]
+        .to_numpy()
     )
 
-    valid_direction = (
+    N = len(df)
 
-        direction[i] != 0
-        and
-        direction[i-1] != 0
-    )
+    N_stops = len(stops_df)
 
-    # -------------------------------------------------
-    # TERMINAL
-    # -------------------------------------------------
+    nearest_stop_id = []
 
-    current_stop = df.iloc[i][
-        "nearest_stop_id"
-    ]
+    nearest_distance = []
 
-    current_speed = df.iloc[i][
-        "speed_kmh"
-    ]
+    for i in range(N):
+        '''
+        if i % 1000 == 0:
 
-    dt = (
+            print(
+                f"{i} / {N}"
+            )
+        '''
+        lat_bus = df.iloc[i]["lat"]
 
-        df.iloc[i]["Time"]
-        -
-        df.iloc[i-1]["Time"]
+        lon_bus = df.iloc[i]["lon"]
 
-    ).total_seconds()
+        dist_all = []
 
-    # -------------------------------------------------
-    # DWELL DETECTION
-    # -------------------------------------------------
+        for j in range(N_stops):
 
-    if (
+            d = haversine(
 
-        current_stop in TERMINAL_STOPS
+                lat_bus,
+                lon_bus,
 
-        and
+                lat_stop[j],
+                lon_stop[j]
+            )
 
-        current_speed < LOW_SPEED_THRESHOLD
+            dist_all.append(d)
 
-    ):
+        dist_all = np.array(
+            dist_all
+        )
 
-        terminal_dwell_time += dt
+        idx_min = np.argmin(
+            dist_all
+        )
 
-    else:
+        nearest_stop_id.append(
 
-        terminal_dwell_time = 0
+            stop_sequence[idx_min]
+        )
 
-        terminal_split_done = False
+        nearest_distance.append(
 
-    # -------------------------------------------------
-    # NOWY KURS
-    # -------------------------------------------------
+            dist_all[idx_min]
+        )
 
-    new_trip = False
+    df["nearest_stop_id"] = nearest_stop_id
 
-    # zmiana kierunku
-    if (
+    df["nearest_distance_m"] = nearest_distance
 
-        direction_change
-        and
-        valid_direction
+    return df
 
-    ):
+# =========================================================
+# DISTANCE FILTER
+# =========================================================
 
-        new_trip = True
+def apply_distance_filter(df):
 
-    # długi postój na terminalu
-    if (
+    print()
+    print("Distance filter...")
 
-        terminal_dwell_time
+    df.loc[
+
+        df["nearest_distance_m"]
         >
-        DWELL_TIME_THRESHOLD
+        MAX_STOP_DISTANCE,
 
+        "nearest_stop_id"
+
+    ] = np.nan
+
+    return df
+
+# =========================================================
+# SPLIT CONSECUTIVE
+# =========================================================
+
+def split_consecutive(idx):
+
+    idx = np.array(idx)
+
+    # =====================================================
+    # EMPTY
+    # =====================================================
+
+    if len(idx) == 0:
+
+        return []
+
+    # =====================================================
+    # DIFFERENCES
+    # =====================================================
+
+    d = np.diff(idx)
+
+    # =====================================================
+    # BREAKS
+    # =====================================================
+
+    breaks = np.where(d > 1)[0]
+
+    # =====================================================
+    # GROUPS
+    # =====================================================
+
+    groups = []
+
+    start = 0
+
+    for b in breaks:
+
+        groups.append(
+
+            idx[start:b+1]
+        )
+
+        start = b + 1
+
+    # =====================================================
+    # LAST GROUP
+    # =====================================================
+
+    groups.append(
+
+        idx[start:]
+    )
+
+    return groups
+
+# =========================================================
+# DIRECTION
+# =========================================================
+
+def compute_direction(df):
+
+    print()
+    print("Direction...")
+
+    # =====================================================
+    # REMOVE NaN EXACTLY LIKE MATLAB
+    # =====================================================
+
+    df = df.dropna(
+        subset=["nearest_stop_id"]
+    ).copy()
+
+    df = df.reset_index(
+        drop=True
+    )
+
+    # =====================================================
+    # DIFF
+    # =====================================================
+
+    dstop = df[
+        "nearest_stop_id"
+    ].diff()
+
+    N = len(df)
+
+    direction = np.zeros(N)
+
+    for i in range(1, N):
+
+        if dstop.iloc[i] > 0:
+
+            direction[i] = 1
+
+        elif dstop.iloc[i] < 0:
+
+            direction[i] = -1
+
+        else:
+
+            direction[i] = direction[i - 1]
+
+    df["direction"] = direction
+
+    return df
+
+# =========================================================
+# SEGMENT COURSES
+# =========================================================
+
+def segment_courses(df):
+
+    print()
+    print("Segment courses...")
+
+    direction = (
+        df["direction"]
+        .to_numpy()
+    )
+
+    N = len(df)
+
+    course_id = np.zeros(
+        N,
+        dtype=int
+    )
+
+    course = 1
+
+    course_id[0] = course
+
+    for i in range(1, N):
+
+        # =================================================
+        # DIRECTION CHANGE
+        # =================================================
+
+        if direction[i] != direction[i - 1]:
+
+            # =============================================
+            # IGNORE ZERO
+            # =============================================
+
+            if (
+
+                direction[i] != 0
+                and
+                direction[i - 1] != 0
+
+            ):
+
+                course += 1
+
+        course_id[i] = course
+
+    df["course_id"] = course_id
+
+    return df
+
+
+# =========================================================
+# EVALUATE COURSES
+# =========================================================
+
+def evaluate_courses(df):
+
+    print()
+    print("Evaluate courses...")
+
+    rows = []
+
+    for course in sorted(
+        df["course_id"].unique()
     ):
 
-        if not terminal_split_done:
+        trip_df = df[
+            df["course_id"] == course
+        ]
 
-            new_trip = True
+        # =================================================
+        # BASIC
+        # =================================================
 
-            terminal_split_done = True
+        n_samples = len(trip_df)
 
-    # -------------------------------------------------
-    # INCREMENT
-    # -------------------------------------------------
+        start_time = trip_df[
+            "Time"
+        ].iloc[0]
 
-    if new_trip:
+        end_time = trip_df[
+            "Time"
+        ].iloc[-1]
+
+        start_stop = trip_df[
+            "nearest_stop_id"
+        ].iloc[0]
+
+        end_stop = trip_df[
+            "nearest_stop_id"
+        ].iloc[-1]
+
+        # =================================================
+        # AMPLITUDE
+        # =================================================
+
+        amplitude = (
+
+            trip_df[
+                "nearest_stop_id"
+            ].max()
+
+            -
+
+            trip_df[
+                "nearest_stop_id"
+            ].min()
+        )
+
+        # =================================================
+        # COVERAGE
+        # =================================================
+
+        n_unique_stops = (
+
+            trip_df[
+                "nearest_stop_id"
+            ]
+
+            .nunique()
+        )
+
+        # =================================================
+        # ROW
+        # =================================================
+
+        rows.append({
+
+            "course_id":
+            int(course),
+
+            "n_samples":
+            n_samples,
+
+            "start_time":
+            start_time,
+
+            "end_time":
+            end_time,
+
+            "start_stop":
+            start_stop,
+
+            "end_stop":
+            end_stop,
+
+            "amplitude":
+            amplitude,
+
+            "n_unique_stops":
+            n_unique_stops
+        })
+
+    course_quality = pd.DataFrame(
+        rows
+    )
+
+    return course_quality
+
+# =========================================================
+# TERMINAL SEGMENTATION
+# =========================================================
+
+def terminal_segmentation(df):
+
+    print()
+    print("Terminal segmentation...")
+
+    # =====================================================
+    # REMOVE NaN
+    # =====================================================
+
+    df = df.dropna(
+        subset=["nearest_stop_id"]
+    ).copy()
+
+    df = df.reset_index(
+        drop=True
+    )
+
+    # =====================================================
+    # STOP ID
+    # =====================================================
+
+    stop_id = (
+        df["nearest_stop_id"]
+        .to_numpy()
+    )
+
+    # =====================================================
+    # GLOBAL TERMINALS
+    # =====================================================
+
+    a = np.min(stop_id)
+
+    b = np.max(stop_id)
+
+    print()
+    print("GLOBAL TERMINALS:")
+    print(a, b)
+
+    # =====================================================
+    # TERMINAL INDICES
+    # =====================================================
+
+    pocz = np.where(
+        stop_id == a
+    )[0]
+
+    kon = np.where(
+        stop_id == b
+    )[0]
+
+    # =====================================================
+    # GROUP TERMINALS
+    # =====================================================
+
+    pocz_groups = split_consecutive(
+        pocz
+    )
+
+    kon_groups = split_consecutive(
+        kon
+    )
+
+    # =====================================================
+    # ARRIVAL / DEPARTURE
+    # =====================================================
+
+    przyj_pocz = []
+    odj_pocz = []
+
+    for g in pocz_groups:
+
+        przyj_pocz.append(
+            int(np.min(g))
+        )
+
+        odj_pocz.append(
+            int(np.max(g))
+        )
+
+    przyj_konc = []
+    odj_konc = []
+
+    for g in kon_groups:
+
+        przyj_konc.append(
+            int(np.min(g))
+        )
+
+        odj_konc.append(
+            int(np.max(g))
+        )
+
+    # =====================================================
+    # TERMINAL EVENTS
+    # =====================================================
+
+    terminal_events = []
+
+    # -----------------------------------------------------
+    # A TERMINAL
+    # -----------------------------------------------------
+
+    for i in range(len(odj_pocz)):
+
+        terminal_events.append({
+
+            "terminal": a,
+
+            "depart_idx": odj_pocz[i]
+        })
+
+    # -----------------------------------------------------
+    # B TERMINAL
+    # -----------------------------------------------------
+
+    for i in range(len(odj_konc)):
+
+        terminal_events.append({
+
+            "terminal": b,
+
+            "depart_idx": odj_konc[i]
+        })
+
+    # =====================================================
+    # SORT CHRONOLOGICALLY
+    # =====================================================
+
+    terminal_events = sorted(
+
+        terminal_events,
+
+        key=lambda x: x["depart_idx"]
+    )
+
+    # =====================================================
+    # COURSE ID
+    # =====================================================
+
+    course_id = np.zeros(
+        len(df),
+        dtype=int
+    )
+
+    trip_ranges = []
+
+    course = 1
+
+    # =====================================================
+    # BUILD TRIPS
+    # =====================================================
+
+    for i in range(
+
+        len(terminal_events) - 1
+    ):
+
+        e1 = terminal_events[i]
+
+        e2 = terminal_events[i + 1]
+
+        # -------------------------------------------------
+        # MUST CHANGE TERMINAL
+        # -------------------------------------------------
+
+        if e1["terminal"] == e2["terminal"]:
+
+            continue
+
+        idx_start = e1["depart_idx"]
+
+        idx_end = e2["depart_idx"]
+
+        # -------------------------------------------------
+        # VALID
+        # -------------------------------------------------
+
+        if idx_end <= idx_start:
+
+            continue
+
+        course_id[
+            idx_start:idx_end+1
+        ] = course
+
+        trip_ranges.append([
+
+            course,
+
+            idx_start,
+            idx_end,
+
+            e1["terminal"],
+            e2["terminal"]
+        ])
 
         course += 1
 
-    course_id[i] = course
+    # =====================================================
+    # SAVE COURSE ID
+    # =====================================================
 
-df["course_id"] = course_id
+    df["course_id"] = course_id
 
-# =====================================================
-# TRIM POSTOJÓW
-# =====================================================
+    trip_table = pd.DataFrame(
 
-print()
-print("Trim terminal dwell...")
+        trip_ranges,
 
-cleaned = []
+        columns=[
 
-for course in sorted(
-    df["course_id"].unique()
+            "course_id",
+
+            "idx_start",
+            "idx_end",
+
+            "start_stop",
+            "end_stop"
+        ]
+    )
+
+    return df, trip_table
+
+# =========================================================
+# RUN CORE
+# =========================================================
+
+def run_segmentation_core(
+
+    df,
+    stops_df
 ):
 
-    trip_df = df[
-        df["course_id"] == course
-    ].copy()
+    # =====================================================
+    # NEAREST STOP
+    # =====================================================
 
-    # -------------------------------------------------
-    # START
-    # -------------------------------------------------
+    df = assign_nearest_stop(
 
-    first_stop = trip_df[
-        "nearest_stop_id"
-    ].iloc[0]
+        df,
+        stops_df
+    )
 
-    start_idx = 0
+    # =====================================================
+    # DISTANCE FILTER
+    # =====================================================
 
-    for i in range(len(trip_df)):
+    df = apply_distance_filter(df)
 
-        s = trip_df[
-            "nearest_stop_id"
-        ].iloc[i]
+    # =====================================================
+    # DIRECTION
+    # =====================================================
 
-        if s != first_stop:
+    df = compute_direction(df)
 
-            start_idx = max(
-                0,
-                i - TRIM_SAMPLES
-            )
+    # =====================================================
+    # SEGMENT COURSES
+    # =====================================================
 
-            break
+    df = segment_courses(df)
 
-    # -------------------------------------------------
-    # END
-    # -------------------------------------------------
+    return df
 
-    last_stop = trip_df[
-        "nearest_stop_id"
-    ].iloc[-1]
+# =========================================================
+# GLOBAL EXTREMA TRIPS
+# =========================================================
 
-    end_idx = len(trip_df)
+def detect_global_trips(df):
+
+    print()
+    print("Global extrema trips...")
+
+    stop_id = (
+        df["nearest_stop_id"]
+        .to_numpy()
+    )
+
+    # =====================================================
+    # GLOBAL MIN / MAX
+    # =====================================================
+
+    a = np.nanmin(stop_id)
+
+    b = np.nanmax(stop_id)
+
+    print()
+    print("GLOBAL EXTREMA:")
+    print(a, b)
+
+    # =====================================================
+    # TERMINALS
+    # =====================================================
+
+    idx_terminal = np.where(
+
+        (stop_id == a)
+
+        |
+
+        (stop_id == b)
+
+    )[0]
+
+    terminal_values = stop_id[
+        idx_terminal
+    ]
+
+    # =====================================================
+    # FULL TRIPS
+    # =====================================================
+
+    trip_ranges = []
 
     for i in range(
-        len(trip_df)-1,
-        -1,
-        -1
+
+        len(idx_terminal) - 1
+
     ):
 
-        s = trip_df[
-            "nearest_stop_id"
-        ].iloc[i]
+        v1 = terminal_values[i]
 
-        if s != last_stop:
+        v2 = terminal_values[i + 1]
 
-            end_idx = min(
-                len(trip_df),
-                i + TRIM_SAMPLES
+        # =================================================
+        # CHANGE TERMINAL
+        # =================================================
+
+        if v1 != v2:
+
+            idx1 = idx_terminal[i]
+
+            idx2 = idx_terminal[i + 1]
+
+            trip_ranges.append([
+
+                idx1,
+                idx2,
+
+                int(v1),
+                int(v2)
+            ])
+
+    trip_df = pd.DataFrame(
+
+        trip_ranges,
+
+        columns=[
+
+            "idx_start",
+            "idx_end",
+
+            "start_stop",
+            "end_stop"
+        ]
+    )
+
+    return trip_df
+
+
+
+# =========================================================
+# MAIN
+# =========================================================
+
+def main():
+
+    # =====================================================
+    # CATALOG
+    # =====================================================
+
+    catalog_df = read_catalog(
+        PATH_CATALOG
+    )
+
+    # =====================================================
+    # LOOP
+    # =====================================================
+
+    for idx, row in catalog_df.iterrows():
+
+        print()
+        print("===================================")
+        print(f"CASE {idx + 1}")
+        print("===================================")
+
+        # =================================================
+        # VALIDATE
+        # =================================================
+
+        valid = validate_case(row)
+
+        if not valid:
+
+            print("Incomplete case -> skipped")
+
+            continue
+
+        try:
+
+            # =============================================
+            # PARAMS
+            # =============================================
+
+            katalog = str(
+                row["KATALOG"]
             )
 
-            break
+            racebox_name = str(
+                row["RaceBox.csv"]
+            )
 
-    trip_df = trip_df.iloc[
-        start_idx:end_idx
-    ]
+            stop_name = str(
+                row["stoptimes_1.xlsx"]
+            )
 
-    cleaned.append(trip_df)
+            vehicle_id = row["vehicle"]
 
-df = pd.concat(
-    cleaned,
-    ignore_index=True
-)
+            od_dnia = row["od_dnia"]
+            od_godz = row["od_godz"]
 
-# =====================================================
-# EXPORT CSV
-# =====================================================
+            do_dnia = row["do_dnia"]
+            do_godz = row["do_godz"]
 
-print()
-print("Export CSV...")
+            # =============================================
+            # PATHS
+            # =============================================
 
-summary_rows = []
+            path_racebox = os.path.join(
 
-for course in sorted(
-    df["course_id"].unique()
-):
+                PATH_DATA,
 
-    trip_df = df[
-        df["course_id"] == course
-    ]
+                katalog,
 
-    filename = (
-        f"racebox_trip_{int(course):03d}.csv"
-    )
+                racebox_name + ".csv"
+            )
 
-    path = os.path.join(
-        output_dir,
-        filename
-    )
+            path_stops = os.path.join(
 
-    trip_df.to_csv(
-        path,
-        index=False
-    )
+                PATH_DATA,
 
-    print("Zapisano:")
-    print(path)
+                katalog,
 
-    summary_rows.append({
+                stop_name + ".xlsx"
+            )
+            # =============================================
+            # EXISTS
+            # =============================================
 
-        "course_id":
-        int(course),
+            if not os.path.exists(path_racebox):
 
-        "start_time":
-        trip_df[
-            "Time"
-        ].iloc[0],
+                print("Missing RaceBox file")
 
-        "end_time":
-        trip_df[
-            "Time"
-        ].iloc[-1],
+                continue
 
-        "n_samples":
-        len(trip_df),
+            if not os.path.exists(path_stops):
 
-        "start_stop":
-        trip_df[
-            "nearest_stop_id"
-        ].iloc[0],
+                print("Missing stops file")
 
-        "end_stop":
-        trip_df[
-            "nearest_stop_id"
-        ].iloc[-1]
-    })
+                continue
 
-# =====================================================
-# SUMMARY
-# =====================================================
+            # =============================================
+            # OUTPUT
+            # =============================================
 
-df_summary = pd.DataFrame(
-    summary_rows
-)
+            output_dir = create_output_directory(
 
-summary_path = os.path.join(
-    output_dir,
-    "trip_summary.csv"
-)
+                PATH_OUTPUT,
 
-df_summary.to_csv(
-    summary_path,
-    index=False
-)
+                racebox_name,
 
-print()
-print(df_summary)
+                vehicle_id
+            )
 
-# =====================================================
-# CONTROL PLOT
-# =====================================================
+            # =============================================
+            # READ
+            # =============================================
 
-print()
-print("Control plot...")
+            df = read_racebox(
+                path_racebox
+            )
 
-plt.figure(figsize=(14, 6))
+            stops_df = read_stops(
+                path_stops
+            )
 
-colors = plt.cm.tab10(
-    np.linspace(
-        0,
-        1,
-        int(df["course_id"].max())
-    )
-)
+            # =============================================
+            # PREPARE
+            # =============================================
 
-for i, course in enumerate(
+            df = prepare_gps(df)
 
-    sorted(
-        df["course_id"].unique()
-    )
-):
+            # =============================================
+            # TIME FILTER
+            # =============================================
+            '''
+            df = apply_time_filter(
 
-    trip_df = df[
-        df["course_id"] == course
-    ]
+                df,
 
-    plt.scatter(
+                od_dnia,
+                od_godz,
 
-        trip_df["Time"],
+                do_dnia,
+                do_godz
+            )
+            '''
+            # =============================================
+            # EMPTY
+            # =============================================
 
-        trip_df["nearest_stop_id"],
+            if len(df) == 0:
 
-        s=3,
+                print()
+                print("No data after filters")
 
-        color=colors[i],
+                continue
 
-        label=f"Trip {int(course)}"
-    )
+            # =============================================
+            # CORE
+            # =============================================
 
-plt.xlabel("Time")
+            df = run_segmentation_core(
 
-plt.ylabel("Stop sequence")
+                df,
+                stops_df
+            )
 
-plt.title(
-    f"RaceBox trip segmentation | line {BUS_NUMBER}"
-)
+            # =====================================================
+            # COURSE QUALITY
+            # =====================================================
 
-plt.grid(True)
+            course_quality = evaluate_courses(
+                df
+            )
 
+            # =====================================================
+            # MINIMUM COURSE SIZE
+            # =====================================================
 
-plt.legend(
-    bbox_to_anchor=(1.02, 1),
-    loc="upper left"
-)
+            MIN_AMPLITUDE = 5
 
+            good_ids = (
 
-plt.tight_layout()
+                course_quality[
 
-plot_path = os.path.join(
-    output_dir,
-    "trip_segmentation.png"
-)
+                    course_quality[
+                        "n_unique_stops"
+                    ]
 
-plt.savefig(
-    plot_path,
-    dpi=300
-)
+                    >
 
-plt.close()
+                    MIN_AMPLITUDE
 
-print()
-print("Zapisano:")
-print(plot_path)
+                ]["course_id"]
 
-print()
-print("DONE")
+                .to_list()
+            )
+
+            # =====================================================
+            # FILTER GOOD COURSES
+            # =====================================================
+
+            df = df[
+
+                df["course_id"]
+                .isin(good_ids)
+
+            ].copy()
+
+            df = df.reset_index(
+                drop=True
+            )
+
+            print()
+            print("GOOD COURSES:")
+            print(sorted(good_ids))
+
+            
+            # =====================================================
+            # EXPORT CSV
+            # =====================================================
+
+            print()
+            print("Export CSV...")
+
+            summary_rows = []
+
+            for course in sorted(
+                df["course_id"].unique()
+            ):
+
+                trip_df = df[
+                    df["course_id"] == course
+                ]
+
+                # -------------------------------------------------
+                # FILENAME
+                # -------------------------------------------------
+
+                filename = (
+                    f"trip_{int(course):03d}.csv"
+                )
+
+                path = os.path.join(
+                    output_dir,
+                    filename
+                )
+
+                # -------------------------------------------------
+                # SAVE
+                # -------------------------------------------------
+
+                trip_df.to_csv(
+
+                    path,
+
+                    index=False
+                )
+
+                print("Zapisano:")
+                print(path)
+
+                
+
+            # =====================================================
+            # GLOBAL TERMINALS
+            # =====================================================
+
+            a = df[
+                "nearest_stop_id"
+            ].min()
+
+            b = df[
+                "nearest_stop_id"
+            ].max()
+
+            # =====================================================
+            # CONTROL PLOT
+            # =====================================================
+
+            print()
+            print("Control plot...")
+
+            plt.figure(figsize=(16, 7))
+
+            unique_courses = sorted(
+                df["course_id"].unique()
+            )
+
+            n_courses = len(unique_courses)
+
+            # =====================================================
+            # COLORS
+            # =====================================================
+
+            cmap = plt.cm.get_cmap(
+
+                "tab20",
+
+                min(max(n_courses, 1), 20)
+            )
+
+            # =====================================================
+            # LOOP
+            # =====================================================
+
+            for i, course in enumerate(unique_courses):
+
+                trip_df = df[
+                    df["course_id"] == course
+                ]
+
+                color = cmap(i % 20)
+
+                # =================================================
+                # REMOVE REPEATED STOPS
+                # =================================================
+
+                idx_keep = np.concatenate([
+
+                    [True],
+
+                    np.diff(
+
+                        trip_df[
+                            "nearest_stop_id"
+                        ]
+
+                    ) != 0
+                ])
+
+                trip_df = trip_df[
+                    idx_keep
+                ].copy()
+
+                # -------------------------------------------------
+                # SCATTER
+                # -------------------------------------------------
+
+                plt.scatter(
+
+                    trip_df["Time"],
+
+                    trip_df["nearest_stop_id"],
+
+                    s=4,
+
+                    color=color,
+
+                    alpha=0.7
+                )
+                
+                # -------------------------------------------------
+                # LINE
+                # -------------------------------------------------
+
+                plt.plot(
+
+                    trip_df["Time"],
+
+                    trip_df["nearest_stop_id"],
+
+                    linewidth=1.2,
+
+                    color=color,
+
+                    alpha=0.9
+                )
+
+                # =========================================
+                # DURATION
+                # =========================================
+
+                duration_min = (
+
+                    time_ab[1]
+                    -
+                    time_ab[0]
+
+                ).total_seconds() / 60
+
+                # =========================================
+                # SUMMARY
+                # =========================================
+
+                summary_rows.append({
+
+                    "vehicle_id":
+
+                        vehicle_id,
+
+                    "course_id":
+
+                        int(course),
+
+                    "start_time":
+
+                        time_ab[0],
+
+                    "end_time":
+
+                        time_ab[1],
+
+                    "start_stop":
+
+                        int(stop_terminal[0]),
+
+                    "end_stop":
+
+                        int(stop_terminal[1]),
+
+                    "direction":
+
+                        int(dir_mode),
+
+                    "duration_min":
+
+                        duration_min
+                })
+
+                # =================================================
+                # COURSE DIRECTION
+                # =================================================
+
+                dir_course = trip_df[
+                    "direction"
+                ]
+
+                dir_course = dir_course[
+                    dir_course != 0
+                ]
+
+                if len(dir_course) == 0:
+
+                    continue
+
+                # dominant direction
+                dir_mode = dir_course.mode()
+
+                if len(dir_mode) == 0:
+
+                    continue
+
+                dir_mode = dir_mode.iloc[0]
+
+                # =================================================
+                # TERMINALS
+                # =================================================
+
+                if dir_mode == 1:
+
+                    stop_terminal = [a, b]
+
+                else:
+
+                    stop_terminal = [b, a]
+
+                # =================================================
+                # DATA
+                # =================================================
+
+                u_stop = trip_df[
+                    "nearest_stop_id"
+                ].to_numpy()
+
+                t_med = trip_df[
+                    "Time"
+                ].to_numpy()
+
+                # =================================================
+                # QUALITY
+                # =================================================
+
+                if (
+
+                    len(u_stop) > 10
+
+                    and
+
+                    np.min(u_stop) - a <= 5
+
+                    and
+
+                    np.max(u_stop) - b <= 5
+                ):
+
+                    # =============================================
+                    # SORT FOR INTERPOLATION
+                    # =============================================
+
+                    idx_sort = np.argsort(
+                        u_stop
+                    )
+
+                    u_sort = u_stop[
+                        idx_sort
+                    ]
+
+                    t_sort = t_med[
+                        idx_sort
+                    ]
+
+                    # =============================================
+                    # REMOVE DUPLICATES
+                    # =============================================
+
+                    u_unique, idx_unique = np.unique(
+
+                        u_sort,
+
+                        return_index=True
+                    )
+
+                    t_unique = t_sort[
+                        idx_unique
+                    ]
+
+                    # =============================================
+                    # INTERPOLATION
+                    # =============================================
+
+                    try:
+
+                        time_ab = np.interp(
+
+                            stop_terminal,
+
+                            u_unique,
+
+                            t_unique.astype(
+                                "datetime64[s]"
+                            ).astype(np.int64)
+                        )
+
+                        time_ab = pd.to_datetime(
+                            time_ab,
+                            unit="s"
+                        )
+
+                        # =========================================
+                        # LINE
+                        # =========================================
+
+                        plt.plot(
+
+                            time_ab,
+
+                            stop_terminal,
+
+                            "-",
+
+                            color=color,
+
+                            linewidth=2
+                        )
+
+                    except:
+
+                        pass
+            
+                        # =====================================================
+            # FINAL SUMMARY
+            # =====================================================
+
+            df_summary = pd.DataFrame(
+                summary_rows
+            )
+
+            summary_path = os.path.join(
+
+                output_dir,
+
+                "trip_summary.csv"
+            )
+
+            df_summary.to_csv(
+
+                summary_path,
+
+                index=False
+            )
+
+            print()
+            print(df_summary)
+
+            # =====================================================
+            # LABELS
+            # =====================================================
+
+            plt.xlabel("Time")
+
+            plt.ylabel("Stop sequence")
+
+            plt.title(
+
+                f"RaceBox segmentation | "
+                f"vehicle {vehicle_id}"
+            )
+
+            plt.grid(True)
+
+            plt.tight_layout()
+
+            # =====================================================
+            # SAVE
+            # =====================================================
+
+            plot_path = os.path.join(
+
+                output_dir,
+
+                "trip_segmentation.png"
+            )
+
+            plt.savefig(
+
+                plot_path,
+
+                dpi=300,
+
+                bbox_inches="tight"
+            )
+
+            plt.close()
+
+            print()
+            print("Zapisano:")
+            print(plot_path)
+
+            print()
+            print("Trips detected:")
+
+            print(
+                sorted(
+                    df["course_id"].unique()
+                )
+            )
+
+            print()
+            print("DONE")
+
+        except Exception as e:
+
+            print()
+            print("CASE FAILED")
+            print(str(e))
+
+# =========================================================
+# START
+# =========================================================
+
+if __name__ == "__main__":
+
+    main()
