@@ -23,6 +23,8 @@ import matplotlib.pyplot as plt
 
 warnings.filterwarnings("ignore")
 
+# python step1_avl_trip_separator.py
+
 # =========================================================
 # PARAMETRY
 # =========================================================
@@ -1811,6 +1813,24 @@ def main():
                     idx1:idx2 + 1
                 ]
 
+                direction = 0
+
+                start_stop = int(
+                    trip_df.iloc[i]["start_stop"]
+                )
+
+                end_stop = int(
+                    trip_df.iloc[i]["end_stop"]
+                )
+
+                if end_stop > start_stop:
+
+                    direction = 1
+
+                else:
+
+                    direction = -1
+
                 trip_summary.append({
 
                     "trip_id":
@@ -1855,7 +1875,10 @@ def main():
                     ],
 
                     "n_samples":
-                    len(segment)
+                    len(segment),
+
+                    "direction":
+                    direction,
                 })
 
             trip_summary = pd.DataFrame(

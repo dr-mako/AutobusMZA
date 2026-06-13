@@ -8,6 +8,8 @@
 # STEP2 SEGMENTATION ENGINE
 #
 # =========================================================
+#
+# python step2_racebox_trip_separator.py
 
 import os
 import glob
@@ -704,6 +706,22 @@ def compute_direction(df):
 
             direction[i] = direction[i - 1]
 
+    # =====================================================
+    # FILL INITIAL ZEROS
+    # =====================================================
+
+    first_nonzero = np.where(
+        direction != 0
+    )[0]
+
+    if len(first_nonzero) > 0:
+
+        first_idx = first_nonzero[0]
+
+        direction[:first_idx] = direction[
+            first_idx
+        ]
+
     df["direction"] = direction
 
     return df
@@ -780,6 +798,17 @@ def evaluate_courses(df):
         trip_df = df[
             df["course_id"] == course
         ]
+
+        print()
+        print("COURSE")
+        print(course)
+
+        print(
+            trip_df["direction"]
+            .value_counts(
+                dropna=False
+            )
+        )
 
         # =================================================
         # BASIC
@@ -1601,7 +1630,7 @@ def main():
 
                     alpha=0.9
                 )
-
+                '''
                 # =========================================
                 # DURATION
                 # =========================================
@@ -1652,7 +1681,7 @@ def main():
 
                         duration_min
                 })
-
+                '''
                 # =================================================
                 # COURSE DIRECTION
                 # =================================================
