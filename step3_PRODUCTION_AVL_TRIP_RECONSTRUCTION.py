@@ -1957,6 +1957,55 @@ def main():
                     f"trip_{trip_id:03d}_arrival_times.csv"
 
                 )
+                '''
+                tmp = pd.to_datetime(
+                    df_avl["vehicle_time"],
+                    dayfirst=True
+                )
+                print()
+                print("UNIQUE SECONDS COUNT")
+
+                print(
+                    tmp.dt.second.value_counts().sort_index()
+                )
+               
+                #diagnosyka FILTR PRZYPADKU
+                print()
+                print("ARRIVAL TABLE DIAGNOSTICS")
+
+                print(
+                    arrival_df[
+                        [
+                            "stop_sequence",
+                            "arrival_time",
+                            "arrival_time_corrected"
+                        ]
+                    ].head(20)
+                )
+
+                print()
+                print("DTYPES")
+
+                print(
+                    arrival_df[
+                        [
+                            "arrival_time",
+                            "arrival_time_corrected"
+                        ]
+                    ].dtypes
+                )
+
+                print()
+                print("FIRST RAW VALUES")
+
+                for v in arrival_df["arrival_time_corrected"].head(10):
+
+                    print(
+                        repr(v)
+                    )
+
+                # koniec diagnostyki
+                '''
 
                 arrival_df.to_csv(
 
