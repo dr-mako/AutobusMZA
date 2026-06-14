@@ -35,6 +35,7 @@ import warnings
 
 import pandas as pd
 import numpy as np
+import traceback
 
 warnings.filterwarnings("ignore")
 
@@ -596,7 +597,7 @@ def build_arrival_table(
             )
 
             distance_list.append(d)
-
+        '''
         # FILTR PRZYPADKÓW        
         if stop_sequence in [3, 7]:
 
@@ -613,7 +614,8 @@ def build_arrival_table(
             print(
                 f"MAX DISTANCE: "
                 f"{np.max(distance_list):.1f}"
-            )        
+            ) 
+        '''       
 
         stop_rows[
             "distance_to_stop_m"
@@ -960,7 +962,9 @@ def build_arrival_table(
                 )
             )
 
-        )        
+        ) 
+
+        t_corrected = t_corrected.floor("s")    
 
         arrival_df.loc[
             idx_row,
@@ -1411,8 +1415,8 @@ def reconstruct_trip_topology(
         "Observed stops:",
         len(unique_stops)
     )
-
-        # FILTR
+    '''
+    # FILTR
     print()
     print("OBSERVED STOPS")
 
@@ -1466,6 +1470,7 @@ def reconstruct_trip_topology(
         ].head(20)
     )
     # FILTR KONIEC
+    '''
 
     df_trip["topology_idx"] = matched_indices
 
@@ -1701,17 +1706,17 @@ def main():
     # =====================================================
 
     for idx, row in catalog_df.iterrows():
-
+        '''
         # FILTR PRZYPADKÓW
-        if row["KATALOG"] != "08-05-151":
+        if row["KATALOG"] != "13-05-146":
             continue
-
+        
         if row["line"] != 151:
             continue
 
         if row["vehicle"] != 8567:
             continue
-
+        '''
         # =================================================
         # VALIDATION
         # =================================================
@@ -1853,10 +1858,11 @@ def main():
                 trip_direction = int(
                     trip["direction"]
                 )
-
+                '''
                 # FILTR PRZYPADKÓW
                 if trip_direction != -1:
                     continue
+                '''
 
                 if trip_direction == 1:
 
@@ -1992,7 +1998,7 @@ def main():
             print()
             print("CASE FAILED")
 
-            print(str(e))
+            traceback.print_exc()
 
         
 

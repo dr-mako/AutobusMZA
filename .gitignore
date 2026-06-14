@@ -6,3 +6,4 @@ OUTPUT_*
 *.csv
 *.png
 *.svg
+.venv

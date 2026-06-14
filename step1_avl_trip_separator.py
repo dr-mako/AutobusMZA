@@ -9,6 +9,7 @@
 # 3. CORE ZGODNY SEMANTYCZNIE Z MATLAB
 #
 # =========================================================
+# python step1_avl_trip_separator.py
 
 import os
 import warnings
@@ -216,7 +217,7 @@ def create_control_plot(
     # DUŻO KURSÓW
     # =================================================
 
-    cmap = plt.cm.get_cmap(
+    cmap = plt.get_cmap(
         "tab20",
         min(max(n_courses, 1), 20)
     )

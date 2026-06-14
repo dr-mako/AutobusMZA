@@ -1557,7 +1557,7 @@ def main():
             # COLORS
             # =====================================================
 
-            cmap = plt.cm.get_cmap(
+            cmap = plt.get_cmap(
 
                 "tab20",
 
